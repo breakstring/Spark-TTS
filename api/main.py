@@ -51,14 +51,61 @@ else:
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # Ensure logs go to console
+    ]
 )
 logger = logging.getLogger(__name__)
+
+# Force logging level to INFO for this module
+logger.setLevel(logging.INFO)
+
+# Add a direct print of key configurations (will show even if logging is filtered)
+def print_config_info():
+    """Print configuration information directly to stdout, bypassing logging system"""
+    settings = get_settings()
+    print("\n" + "="*80)
+    print("SPARK-TTS CONFIGURATION SUMMARY")
+    print("="*80)
+    
+    # Print environment variables
+    print("\nENVIRONMENT VARIABLES:")
+    print(f"SPARK_TTS_DEFAULT_PROMPT_SPEECH = {os.getenv('SPARK_TTS_DEFAULT_PROMPT_SPEECH', 'not set')}")
+    print(f"SPARK_TTS_MODEL_DIR = {os.getenv('SPARK_TTS_MODEL_DIR', 'not set')}")
+    print(f"SPARK_TTS_OUTPUT_DIR = {os.getenv('SPARK_TTS_OUTPUT_DIR', 'not set')}")
+    print(f"SPARK_TTS_DEVICE = {os.getenv('SPARK_TTS_DEVICE', 'not set')}")
+    
+    # Print calculated paths
+    print("\nCALCULATED PATHS:")
+    # Project root
+    print(f"PROJECT_ROOT = {settings.PROJECT_ROOT}")
+    print(f"Current directory = {os.getcwd()}")
+    
+    # Default prompt speech
+    prompt_speech_path = settings.get_absolute_path(settings.DEFAULT_PROMPT_SPEECH)
+    print(f"DEFAULT_PROMPT_SPEECH = {settings.DEFAULT_PROMPT_SPEECH}")
+    print(f"  Absolute path = {prompt_speech_path}")
+    print(f"  File exists = {os.path.exists(prompt_speech_path)}")
+    
+    # Model directory
+    model_dir_path = settings.get_absolute_path(settings.MODEL_DIR)
+    print(f"MODEL_DIR = {settings.MODEL_DIR}")
+    print(f"  Absolute path = {model_dir_path}")
+    print(f"  Directory exists = {os.path.exists(model_dir_path)}")
+    
+    # Output directory
+    output_dir_path = settings.get_absolute_path(settings.OUTPUT_DIR)
+    print(f"OUTPUT_DIR = {settings.OUTPUT_DIR}")
+    print(f"  Absolute path = {output_dir_path}")
+    print(f"  Directory exists = {os.path.exists(output_dir_path)}")
+    
+    print("="*80 + "\n")
 
 # === Configuration Items ===
 class Settings:
     # Service configuration
-    API_PORT: int = int(os.getenv('SPARK_TTS_API_PORT', 8000))
+    API_PORT: int = int(os.getenv('SPARK_TTS_API_PORT', 7860))
     API_HOST: str = os.getenv('SPARK_TTS_API_HOST', '0.0.0.0')
     API_DEBUG: bool = os.getenv('SPARK_TTS_API_DEBUG', 'False').lower() == 'true'
     
@@ -75,6 +122,8 @@ class Settings:
                                           "吃燕窝就选燕之屋，本节目由26年专注高品质燕窝的燕之屋冠名播出。豆奶牛奶换着喝，营养更均衡，本节目由豆本豆豆奶特约播出。")
     DEFAULT_PROMPT_SPEECH: str = os.getenv('SPARK_TTS_DEFAULT_PROMPT_SPEECH', 
                                            "example/prompt_audio.wav")
+    logger.info(f"Environment variable SPARK_TTS_DEFAULT_PROMPT_SPEECH value: {os.getenv('SPARK_TTS_DEFAULT_PROMPT_SPEECH', 'not set')}")
+    logger.info(f"Configured DEFAULT_PROMPT_SPEECH value: {DEFAULT_PROMPT_SPEECH}")
     
     # Output configuration
     OUTPUT_DIR: str = os.getenv('SPARK_TTS_OUTPUT_DIR', 'api/outputs')
@@ -91,18 +140,34 @@ class Settings:
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     # Get absolute path
-    def get_absolute_path(self, path):
-        """Get absolute path, ensuring all relative paths are relative to the project root directory"""
+    def get_absolute_path(self, path, log=False):
+        """Get absolute path, ensuring all relative paths are relative to the project root directory
+        
+        Args:
+            path: The path to convert
+            log: Whether to log the path conversion (default: False)
+        
+        Returns:
+            Absolute path
+        """
         if os.path.isabs(path):
+            if log:
+                logger.info(f"Path is already absolute: {path}")
             return path
         
         # If it's a path relative to the project root directory (starting with ../)
         if path.startswith("../"):
-            return os.path.join(self.PROJECT_ROOT, path[3:])
+            abs_path = os.path.join(self.PROJECT_ROOT, path[3:])
+            if log:
+                logger.info(f"Converting relative path (../) to absolute: {path} -> {abs_path}")
+            return abs_path
             
         # General relative path, considered relative to the project root directory
         # This ensures that the path resolution is consistent regardless of where the script is run from
-        return os.path.join(self.PROJECT_ROOT, path)
+        abs_path = os.path.join(self.PROJECT_ROOT, path)
+        if log:
+            logger.info(f"Converting relative path to absolute: {path} -> {abs_path}")
+        return abs_path
 
 @lru_cache
 def get_settings():
@@ -191,61 +256,46 @@ cleanup_task = None
 
 # === Helper Functions ===
 def initialize_model():
-    """Initialize TTS model"""
-    global tts_model
+    """Initialize the TTS model
+    
+    Returns:
+        SparkTTS: Initialized SparkTTS model
+    """
     settings = get_settings()
     
-    if tts_model is None:
-        model_dir = settings.get_absolute_path(settings.MODEL_DIR)
-        logger.info(f"Initializing Spark-TTS model, path: {model_dir}")
-        logger.info(f"Using inference device: {settings.DEVICE}")
-        
-        # Check if model directory and config file exist
-        if not os.path.exists(model_dir):
-            error_msg = f"Model directory does not exist: {model_dir}"
-            logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
-        
-        config_file = os.path.join(model_dir, "config.yaml")
-        if not os.path.exists(config_file):
-            error_msg = f"Model config file does not exist: {config_file}"
-            logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
-        
-        # Process device parameters
-        device_param = settings.DEVICE.lower().strip()
-        
-        if device_param == "cpu":
-            # CPU mode
-            device = torch.device("cpu")
-        elif device_param == "gpu":
-            # Use any available GPU
-            if torch.cuda.is_available():
-                device = torch.device("cuda")
-            else:
-                logger.warning("No GPU detected, falling back to CPU mode")
-                device = torch.device("cpu")
-        elif device_param.startswith("gpu:"):
-            # Specific GPU device
-            try:
-                gpu_id = int(device_param.split(":")[-1])
-                if gpu_id >= 0 and gpu_id < torch.cuda.device_count():
-                    device = torch.device(f"cuda:{gpu_id}")
-                else:
-                    logger.warning(f"GPU device {gpu_id} does not exist, falling back to CPU mode")
-                    device = torch.device("cpu")
-            except ValueError:
-                logger.warning(f"Invalid GPU device ID: {device_param}, falling back to CPU mode")
-                device = torch.device("cpu")
-        else:
-            # Default CPU
-            logger.warning(f"Unrecognized device parameter: {device_param}, using CPU mode")
-            device = torch.device("cpu")
-            
-        tts_model = SparkTTS(model_dir, device)
-        logger.info(f"Spark-TTS model initialization completed, actual used device: {device}")
+    # Get model path
+    model_dir = settings.get_absolute_path(settings.MODEL_DIR, log=True)
+    logger.info(f"Initializing Spark-TTS model, path: {model_dir}")
     
-    return tts_model
+    # Process device parameter
+    device_param = settings.DEVICE.lower().strip()
+    
+    # Convert 'gpu' to appropriate device format for PyTorch
+    if device_param == "gpu":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"Mapped 'gpu' to PyTorch device: {device}")
+    elif device_param.startswith("gpu:"):
+        gpu_id = device_param.split(":")[-1]
+        if torch.cuda.is_available():
+            device = f"cuda:{gpu_id}"
+            logger.info(f"Using CUDA device {gpu_id}")
+        else:
+            device = "cpu"
+            logger.warning("No CUDA available, falling back to CPU")
+    else:
+        # Use the device as-is
+        device = device_param
+    
+    logger.info(f"Using inference device: {device}")
+    
+    # Initialize model
+    try:
+        model = SparkTTS(model_dir=model_dir, device=device)
+        logger.info(f"Spark-TTS model initialization completed, actual used device: {model.device}")
+        return model
+    except Exception as e:
+        logger.error(f"Model initialization failed: {str(e)}")
+        raise
 
 async def process_audio_source(request: TTSRequest) -> tuple:
     """Process audio source, return temporary file path and whether to clean up"""
@@ -321,7 +371,7 @@ async def process_audio_source(request: TTSRequest) -> tuple:
                     logger.info(f"Detected self-reference, directly reading file: {file_path}")
                     
                     # Build local file path
-                    local_file_path = os.path.join(settings.get_absolute_path(settings.OUTPUT_DIR), file_path)
+                    local_file_path = os.path.join(settings.get_absolute_path(settings.OUTPUT_DIR, log=True), file_path)
                     logger.info(f"Local file path: {local_file_path}")
                     
                     if os.path.exists(local_file_path):
@@ -372,7 +422,7 @@ async def process_audio_source(request: TTSRequest) -> tuple:
     # If no audio is provided, use default audio
     else:
         # Get absolute path of default prompt audio
-        prompt_speech_path = settings.get_absolute_path(settings.DEFAULT_PROMPT_SPEECH)
+        prompt_speech_path = settings.get_absolute_path(settings.DEFAULT_PROMPT_SPEECH, log=True)
         logger.info(f"Using default prompt audio: {prompt_speech_path}")
         
         if not os.path.exists(prompt_speech_path):
@@ -384,15 +434,16 @@ async def process_audio_source(request: TTSRequest) -> tuple:
                 os.path.join(os.path.dirname(os.path.abspath(__file__)), "../example/prompt_audio.wav")
             ]
             
+            logger.info(f"Searching for alternative prompt audio files...")
             for path in alt_paths:
+                logger.info(f"Checking alternative path: {path}")
                 if os.path.exists(path):
-                    prompt_speech_path = path
-                    logger.info(f"Found alternative prompt audio: {prompt_speech_path}")
+                    logger.info(f"✅ Found alternative prompt audio: {path}")
+                    settings.DEFAULT_PROMPT_SPEECH = path
+                    logger.info(f"Updated DEFAULT_PROMPT_SPEECH value: {path}")
                     break
-            
-            if not os.path.exists(prompt_speech_path):
-                logger.error("Unable to find valid default prompt audio")
-                raise HTTPException(status_code=500, detail="Unable to find valid default prompt audio file")
+            else:
+                logger.warning("❌ No alternative prompt audio files found in any location, service may not work properly")
         
         # Verify default audio is a valid WAV file
         try:
@@ -429,89 +480,46 @@ def get_prompt_text(request: TTSRequest) -> str:
 AudioDataType = TypeVar('AudioDataType')
 
 async def save_output_audio(audio_data, sample_rate: int = 16000) -> tuple:
-    """Save generated audio and return file information"""
+    """Save output audio to file
+
+    Args:
+        audio_data: Audio data to save
+        sample_rate: Sample rate of audio data
+
+    Returns:
+        tuple: (file_id, output_path, output_url, duration)
+    """
     settings = get_settings()
     
-    # Ensure output directory is absolute path
-    output_dir = settings.get_absolute_path(settings.OUTPUT_DIR)
+    # Convert to numpy array if needed
+    if isinstance(audio_data, torch.Tensor):
+        audio_np = audio_data.cpu().numpy()
+    else:
+        audio_np = audio_data
+    
+    # Generate output file path
+    file_id = str(uuid.uuid4())
+    file_name = f"{file_id}.wav"
     
     # Ensure output directory exists
+    output_dir = settings.get_absolute_path(settings.OUTPUT_DIR, log=True)
     os.makedirs(output_dir, exist_ok=True)
     
-    # Generate unique file name
-    file_id = str(uuid.uuid4())
-    output_path = os.path.join(output_dir, f"{file_id}.wav")
+    # Create output file path
+    output_path = os.path.join(output_dir, file_name)
+    output_url = f"{settings.OUTPUT_URL_PREFIX}/{file_name}"
     
-    # Record audio data type
-    logger.info(f"Audio data type: {type(audio_data)}")
+    # Calculate audio duration
+    duration = len(audio_np) / sample_rate
     
+    # Save audio to file
     try:
-        # Process different types of audio data
-        if isinstance(audio_data, torch.Tensor):
-            # PyTorch tensor processing
-            logger.info("Detected PyTorch tensor")
-            try:
-                audio_np = audio_data.cpu().numpy()
-                logger.info("Successfully converted to NumPy array")
-            except Exception as e:
-                logger.error(f"PyTorch tensor conversion failed: {str(e)}")
-                raise
-        elif isinstance(audio_data, np.ndarray):
-            # NumPy array processing
-            logger.info("Detected NumPy array")
-            audio_np = audio_data
-        else:
-            # Unknown type processing
-            logger.warning(f"Detected unknown type: {type(audio_data)}")
-            
-            # Try multiple conversion methods
-            try:
-                # Method 1: Try to process as PyTorch tensor
-                audio_np = audio_data.cpu().numpy()
-                logger.info("Method 1 conversion successful")
-            except (AttributeError, TypeError) as e:
-                logger.warning(f"Method 1 failed: {str(e)}")
-                try:
-                    # Method 2: Direct conversion to NumPy array
-                    audio_np = np.array(audio_data)
-                    logger.info("Method 2 conversion successful")
-                except Exception as e:
-                    logger.error(f"Method 2 also failed: {str(e)}")
-                    raise ValueError(f"Unprocessable audio data type: {type(audio_data)}")
-        
-        # Validate audio data
-        if audio_np is None:
-            logger.error("Audio data is None")
-            raise ValueError("Audio data is None")
-        
-        if audio_np.size == 0:
-            logger.error("Audio data is an empty array")
-            raise ValueError("Audio data is an empty array")
-        
-        # Log audio data information
-        logger.info(f"Audio data shape: {audio_np.shape}, data type: {audio_np.dtype}")
-        
-        # Save as WAV file
         sf.write(output_path, audio_np, sample_rate)
-        logger.info(f"Audio saved successfully: {output_path}")
-        
-        # Calculate audio duration
-        duration = len(audio_np) / sample_rate
-        logger.info(f"Audio duration: {duration} seconds")
-        
+        logger.info(f"Saved audio to {output_path}, size: {os.path.getsize(output_path)} bytes")
+        return file_id, output_path, output_url, duration
     except Exception as e:
-        logger.error(f"Audio processing failed: {str(e)}", exc_info=True)
-        
-        # Create an empty audio file as a replacement
-        logger.warning("Creating 1 second of silence as a replacement")
-        empty_audio = np.zeros(sample_rate, dtype=np.float32)  # 1 second of silence
-        sf.write(output_path, empty_audio, sample_rate)
-        duration = 1.0  # 1 second
-    
-    # Build URL
-    output_url = f"{settings.OUTPUT_URL_PREFIX}/{file_id}.wav"
-    
-    return file_id, output_path, output_url, duration
+        logger.error(f"Failed to save audio: {str(e)}")
+        raise
 
 def get_audio_base64(file_path: str) -> str:
     """Convert audio file to Base64 encoding"""
@@ -529,8 +537,8 @@ async def cleanup_old_files():
             now = datetime.now()
             expiry_time = now - timedelta(seconds=settings.FILE_EXPIRY_TIME)
             
-            # Ensure output directory is absolute path
-            output_dir = settings.get_absolute_path(settings.OUTPUT_DIR)
+            # Ensure output directory is absolute path (disable logging here to avoid duplication)
+            output_dir = settings.get_absolute_path(settings.OUTPUT_DIR, log=False)
             
             # Ensure output directory exists
             if not os.path.exists(output_dir):
@@ -754,71 +762,31 @@ async def health_check():
 # === Application startup and shutdown events ===
 @app.on_event("startup")
 async def startup_event():
+    """Initialize the TTS model on startup"""
+    # Load environment variables
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    
     global cleanup_task
     settings = get_settings()
     
-    # Output key configuration information
-    logger.info(f"Starting Spark-TTS API service, listening port: {settings.API_PORT}")
-    logger.info(f"Configured inference device: {settings.DEVICE}")
-    
-    # Record output directory
-    output_dir = settings.get_absolute_path(settings.OUTPUT_DIR)
-    logger.info(f"Audio output directory: {output_dir} (configured value: {settings.OUTPUT_DIR})")
-    
-    # Ensure output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Verify model directory
-    model_dir = settings.get_absolute_path(settings.MODEL_DIR)
-    if not os.path.exists(model_dir):
-        logger.error(f"Model directory does not exist: {model_dir}")
-        # Try to find alternative path
-        alt_model_paths = [
-            os.path.join(settings.PROJECT_ROOT, "pretrained_models/Spark-TTS-0.5B"),
-            os.path.join(os.getcwd(), "pretrained_models/Spark-TTS-0.5B"),
-        ]
-        for path in alt_model_paths:
-            if os.path.exists(path):
-                settings.MODEL_DIR = path
-                logger.info(f"Found alternative model directory: {path}")
-                break
-        else:
-            logger.warning("No valid model directory found, service may not work properly")
-    
-    # Verify default prompt audio
-    prompt_speech_path = settings.get_absolute_path(settings.DEFAULT_PROMPT_SPEECH)
-    if not os.path.exists(prompt_speech_path):
-        logger.warning(f"Default prompt audio does not exist: {prompt_speech_path}")
-        # Try to find in different locations
-        alt_paths = [
-            os.path.join(settings.PROJECT_ROOT, "example/prompt_audio.wav"),
-            os.path.join(os.getcwd(), "example/prompt_audio.wav"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "../example/prompt_audio.wav")
-        ]
-        
-        for path in alt_paths:
-            if os.path.exists(path):
-                settings.DEFAULT_PROMPT_SPEECH = path
-                logger.info(f"Found alternative prompt audio: {path}")
-                break
-        else:
-            logger.warning("No valid default prompt audio file found, service may not work properly")
+    # Print essential configuration information (bypassing logging system)
+    # This direct print ensures critical config is always visible even if logging is filtered
+    print_config_info()
     
     # Initialize model
     try:
-        initialize_model()
-        logger.info("Model initialization completed")
+        model = initialize_model()
     except Exception as e:
-        logger.error(f"Model initialization failed: {str(e)}", exc_info=True)
-        logger.warning("Model initialization failed, service may not work properly")
+        logger.error(f"Failed to initialize model: {str(e)}")
+        model = None
     
     # Start scheduled cleanup task
     cleanup_task = asyncio.create_task(cleanup_old_files())
     
     # Mount static files directory
     try:
-        # Ensure output directory is absolute path
-        output_dir = settings.get_absolute_path(settings.OUTPUT_DIR)
+        # Ensure output directory is absolute path (log only once during startup)
+        output_dir = settings.get_absolute_path(settings.OUTPUT_DIR, log=True)
         os.makedirs(output_dir, exist_ok=True)
         logger.info(f"Using output directory: {output_dir}")
         
@@ -833,7 +801,7 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Mounting static files directory failed: {str(e)}")
     
-    logger.info("Spark-TTS API service started")
+    logger.info("Spark-TTS API service started successfully")
 
 @app.on_event("shutdown")
 async def shutdown_event():

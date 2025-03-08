@@ -60,7 +60,7 @@ You can customize the behavior of the service with the following parameters:
 ```
 
 Parameter descriptions:
-- `--port`: Port for the service to listen on (default: 8000)
+- `--port`: Port for the service to listen on (default: 7860)
 - `--device`: GPU device ID to use (default: 0)
 - `--model_dir`: Model directory path (default: pretrained_models/Spark-TTS-0.5B)
 - `--debug`: Enable debug mode
@@ -154,31 +154,34 @@ GET /health
 An example client script is provided to demonstrate how to use the API:
 
 ```bash
-python api/example_client.py --text "This is a test" --mode basic
+# Note: The example client requires librosa, which is not in requirements.txt
+# Install it before running the client:
+pip install librosa
+
+# Basic usage
+python api/example_client.py --text "This is a test"
 ```
 
-Different modes:
-- `basic`: Use default settings
-- `clone`: Voice cloning mode, requires reference audio
-- `create`: Voice creation mode, requires control parameters
-- `combined`: Combined mode, uses both voice cloning and voice creation
+You can use different parameter combinations for different features:
 
-Voice cloning example:
-
+- **For voice cloning** (using reference audio):
 ```bash
-python api/example_client.py --mode clone --text "This is an example of voice cloning" --prompt_audio example/prompt_audio.wav
+python api/example_client.py --text "This is an example of voice cloning" --prompt_audio example/prompt_audio.wav
 ```
 
-Voice creation example:
-
+- **For voice creation** (using control parameters):
 ```bash
-python api/example_client.py --mode create --text "This is an example of voice creation" --gender female --pitch high --speed moderate
+python api/example_client.py --text "This is an example of voice creation" --gender female --pitch high --speed moderate
 ```
 
-Combined mode example:
-
+- **Combined features** (both voice cloning and creation):
 ```bash
-python api/example_client.py --mode combined --text "This is an example of combined mode" --prompt_audio example/prompt_audio.wav --gender male --pitch low
+python api/example_client.py --text "This is an example of combined features" --prompt_audio example/prompt_audio.wav --gender male --pitch low
+```
+
+- **Using with API key**:
+```bash
+python api/example_client.py --text "This is a test" --api_key YOUR_API_KEY
 ```
 
 ## Environment Variable Configuration
@@ -187,7 +190,7 @@ The API service can be configured using the following environment variables:
 
 | Environment Variable | Description | Default Value |
 |----------|------|--------|
-| SPARK_TTS_API_PORT | API service port | 8000 |
+| SPARK_TTS_API_PORT | API service port | 7860 |
 | SPARK_TTS_API_HOST | API service host | 0.0.0.0 |
 | SPARK_TTS_API_DEBUG | Whether to enable debug mode | False |
 | SPARK_TTS_API_KEY | API key (authentication not enabled if not set) | None |
@@ -207,7 +210,7 @@ The API design considers operation in a Docker environment and can be flexibly c
 
 Example Docker mount command:
 ```bash
-docker run -p 8000:8000 -v /local/path/api/.env:/app/api/.env -v /local/path/pretrained_models:/app/pretrained_models spark-tts:latest
+docker run -p 7860:7860 -v /local/path/api/.env:/app/api/.env -v /local/path/pretrained_models:/app/pretrained_models spark-tts:latest
 ```
 
 ## Notes
@@ -217,4 +220,4 @@ docker run -p 8000:8000 -v /local/path/api/.env:/app/api/.env -v /local/path/pre
 - Generated audio files will be automatically deleted after the set expiration time, default is 24 hours.
 - Static file service has been configured, and generated audio files can be accessed directly via URL.
 - **The server only accepts audio files in WAV format**. If you need to use other formats (such as MP3), please convert them to WAV format on the client side before uploading. The example client includes automatic conversion functionality.
-- When using the `prompt_audio_url` parameter to point to an audio file on the same server (such as `http://localhost:8000/outputs/xxx.wav`), the server will read the local file directly rather than downloading it via HTTP to avoid circular reference issues. 
+- When using the `prompt_audio_url` parameter to point to an audio file on the same server (such as `http://localhost:7860/outputs/xxx.wav`), the server will read the local file directly rather than downloading it via HTTP to avoid circular reference issues. 

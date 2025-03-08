@@ -76,23 +76,7 @@ def convert_audio_to_wav(input_file, output_file=None):
     
     # Try different methods for conversion
     
-    # Method 1: Using librosa (supports multiple formats)
-    try:
-        import librosa
-        import soundfile as sf
-        print(f"Loading audio using librosa: {input_file}")
-        audio_data, sample_rate = librosa.load(input_file, sr=None)
-        print(f"Converting to WAV format, sample rate: {sample_rate}Hz")
-        sf.write(output_file, audio_data, sample_rate)
-        print(f"Audio conversion successful: {output_file}")
-        return output_file
-    except ImportError:
-        print("Warning: librosa library not installed, cannot use this method for conversion")
-        print("Tip: Install librosa library to support more audio formats: pip install librosa")
-    except Exception as e:
-        print(f"Conversion with librosa failed: {str(e)}")
-    
-    # Method 2: Try using ffmpeg (if installed on the system)
+    # Method 1: Try using ffmpeg (if installed on the system)
     try:
         import subprocess
         print(f"Attempting to convert using ffmpeg: {input_file}")
@@ -109,8 +93,24 @@ def convert_audio_to_wav(input_file, output_file=None):
     except Exception as e:
         print(f"Conversion with ffmpeg failed: {str(e)}")
     
+    # Method 2: Using librosa (supports multiple formats) - as fallback
+    try:
+        import librosa
+        import soundfile as sf
+        print(f"Loading audio using librosa: {input_file}")
+        audio_data, sample_rate = librosa.load(input_file, sr=None)
+        print(f"Converting to WAV format, sample rate: {sample_rate}Hz")
+        sf.write(output_file, audio_data, sample_rate)
+        print(f"Audio conversion successful: {output_file}")
+        return output_file
+    except ImportError:
+        print("Warning: librosa library not installed, cannot use this method for conversion")
+        print("Tip: Install librosa library to support more audio formats: pip install librosa")
+    except Exception as e:
+        print(f"Conversion with librosa failed: {str(e)}")
+    
     print("Error: All conversion methods failed, unable to convert audio to WAV format")
-    print("Please ensure librosa library is installed (pip install librosa) or ffmpeg")
+    print("Please ensure ffmpeg is installed or install librosa library (pip install librosa)")
     return None
 
 
@@ -279,7 +279,7 @@ def tts_request(
 
 def main():
     parser = argparse.ArgumentParser(description="Spark-TTS API Client Example")
-    parser.add_argument("--api_url", default="http://localhost:8000/", help="Base URL of the API service")
+    parser.add_argument("--api_url", default="http://localhost:7860/", help="Base URL of the API service")
     parser.add_argument("--api_key", default=None, help="API key")
     parser.add_argument("--text", default="Welcome to the Spark-TTS speech synthesis system.", help="Text to synthesize")
     parser.add_argument("--output_dir", default="example_client_outputs", help="Directory for client to locally save audio, separate from server-side storage directory")
