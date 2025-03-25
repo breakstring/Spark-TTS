@@ -46,7 +46,7 @@ fi
 
 # Build lite version (without models)
 echo -e "${GREEN}Building ${IMAGE_NAME}:${LITE_TAG} (without models)...${NC}"
-docker build -t ${IMAGE_NAME}:${LITE_TAG} .
+docker build --target lite -t ${IMAGE_NAME}:${LITE_TAG} .
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build ${IMAGE_NAME}:${LITE_TAG}${NC}"
@@ -59,7 +59,7 @@ docker tag ${IMAGE_NAME}:${LITE_TAG} ${IMAGE_NAME}:${BASE_TAG}
 
 # Build full version (with models)
 echo -e "${GREEN}Building ${IMAGE_NAME}:${FULL_TAG} (with models)...${NC}"
-docker build --build-arg INCLUDE_MODELS=true -t ${IMAGE_NAME}:${FULL_TAG} .
+docker build --target full --build-arg INCLUDE_MODELS=true -t ${IMAGE_NAME}:${FULL_TAG} .
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build ${IMAGE_NAME}:${FULL_TAG}${NC}"
@@ -86,4 +86,4 @@ echo -e "  docker run -p 7860:7860 --gpus all -e SERVICE_TYPE=webui ${IMAGE_NAME
 echo
 echo -e "To use the lite version, you must mount the models directory:"
 echo -e "  docker run -p 7860:7860 --gpus all -v /local/path/to/models:/app/pretrained_models ${IMAGE_NAME}:${LITE_TAG}"
-echo 
+echo
